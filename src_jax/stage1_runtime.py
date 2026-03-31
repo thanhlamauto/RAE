@@ -60,6 +60,7 @@ def list_image_files(input_path: str | Path) -> list[Path]:
             raise ValueError(f"Unsupported image file: {resolved}")
         return [resolved]
 
+    print(f"[stage1-runtime] Listing image files from {resolved}... (this can take several minutes for 1M+ images)")
     image_paths = sorted(
         path
         for path in resolved.rglob("*")
