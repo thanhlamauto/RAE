@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 import numpy as np
-from PIL import Image
 import torch
+from PIL import Image
+from tqdm import tqdm
 
 try:
     from .config_adapter import build_backend_config_dict, load_repo_config
@@ -64,9 +65,7 @@ def list_image_files(input_path: str | Path) -> list[Path]:
     if subdirs:
         print(f"[stage1-runtime] Found {len(subdirs)} subdirectories under {resolved}. Indexing...")
         image_paths = []
-        for i, subdir in enumerate(subdirs, 1):
-            if i % 100 == 0 or i == 1 or i == len(subdirs):
-                print(f"[stage1-runtime]   Indexing subdir {i}/{len(subdirs)}: {subdir.name}")
+        for i, subdir in enumerate(tqdm(subdirs, desc="Indexing subdirs", unit="class"), 1):
             for path in subdir.rglob("*"):
                 if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
                     image_paths.append(path)
@@ -168,6 +167,7 @@ def run_stage1_latent_stats(args: argparse.Namespace) -> Path:
     latent_sumsq: np.ndarray | None = None
     processed = 0
     total = len(image_paths)
+    pbar = tqdm(total=total, desc="Computing stats", unit="img")
 
     for batch_idx, batch_paths in enumerate(_iter_batches(image_paths, args.batch_size), start=1):
         batch = _load_batch(batch_paths, args.num_workers)
@@ -183,9 +183,9 @@ def run_stage1_latent_stats(args: argparse.Namespace) -> Path:
             latent_sumsq += batch_sumsq
 
         processed += latents.shape[0]
-        if args.log_every > 0 and (batch_idx == 1 or batch_idx % args.log_every == 0 or processed == total):
-            print(f"[stage1-stats] processed {processed}/{total} images")
+        pbar.update(latents.shape[0])
 
+    pbar.close()
     assert latent_sum is not None and latent_sumsq is not None
     mean_hwc, var_hwc = finalize_latent_stats(latent_sum, latent_sumsq, processed)
     return save_latent_stats(args.output, mean_hwc=mean_hwc, var_hwc=var_hwc, count=processed)
@@ -207,6 +207,7 @@ def run_stage1_folder_reconstruction(args: argparse.Namespace) -> Path:
 
     processed = 0
     total = len(image_paths)
+    pbar = tqdm(total=total, desc="Reconstructing", unit="img")
     relative_root = input_root if input_root.is_dir() else input_root.parent
     output_ext = args.output_ext if args.output_ext.startswith(".") else f".{args.output_ext}"
 
@@ -222,7 +223,7 @@ def run_stage1_folder_reconstruction(args: argparse.Namespace) -> Path:
             Image.fromarray(recon).save(destination)
 
         processed += len(batch_paths)
-        if args.log_every > 0 and (batch_idx == 1 or batch_idx % args.log_every == 0 or processed == total):
-            print(f"[stage1-recon] processed {processed}/{total} images")
+        pbar.update(len(batch_paths))
 
+    pbar.close()
     return output_dir
