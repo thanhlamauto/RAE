@@ -60,12 +60,24 @@ def list_image_files(input_path: str | Path) -> list[Path]:
             raise ValueError(f"Unsupported image file: {resolved}")
         return [resolved]
 
-    print(f"[stage1-runtime] Listing image files from {resolved}... (this can take several minutes for 1M+ images)")
-    image_paths = sorted(
-        path
-        for path in resolved.rglob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    )
+    subdirs = sorted([d for d in resolved.iterdir() if d.is_dir()])
+    if subdirs:
+        print(f"[stage1-runtime] Found {len(subdirs)} subdirectories under {resolved}. Indexing...")
+        image_paths = []
+        for i, subdir in enumerate(subdirs, 1):
+            if i % 100 == 0 or i == 1 or i == len(subdirs):
+                print(f"[stage1-runtime]   Indexing subdir {i}/{len(subdirs)}: {subdir.name}")
+            for path in subdir.rglob("*"):
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                    image_paths.append(path)
+        image_paths.sort()
+    else:
+        print(f"[stage1-runtime] Listing image files from {resolved}... (this can take time for large folders)")
+        image_paths = sorted(
+            path
+            for path in resolved.rglob("*")
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        )
     if not image_paths:
         raise FileNotFoundError(f"No image files found under: {resolved}")
     return image_paths
