@@ -61,6 +61,37 @@ def list_image_files(input_path: str | Path) -> list[Path]:
             raise ValueError(f"Unsupported image file: {resolved}")
         return [resolved]
 
+    # KAGGLE FAST SCAN: ImageNet Challenge CSV manifests
+    if "imagenet-object-localization-challenge" in str(resolved):
+        manifest_name = f"LOC_{resolved.name}_solution.csv"
+        # Look for the manifest in standard Kaggle locations relative to Data/CLS-LOC
+        # Usually lives in the competition root: /kaggle/input/competitions/imagenet-object-localization-challenge/
+        potential_roots = [resolved.parents[3], resolved.parents[4]]
+        csv_path = None
+        for root in potential_roots:
+            if (root / manifest_name).exists():
+                csv_path = root / manifest_name
+                break
+        
+        if csv_path:
+            print(f"[stage1-runtime] Found Kaggle manifest at {csv_path}. Using fast scan...")
+            import pandas as pd
+            df = pd.read_csv(csv_path)
+            image_paths = []
+            
+            # Check pattern on first file to avoid million per-file exists checks on slow GCSFuse
+            first_id = df.iloc[0]["ImageId"]
+            class_id = first_id.split("_")[0]
+            if (resolved / class_id / f"{first_id}.JPEG").exists():
+                print(f"[stage1-runtime] Detected nested layout for {resolved.name}.")
+                for img_id in tqdm(df["ImageId"], desc=f"Mapping {resolved.name}", unit="file"):
+                    image_paths.append(resolved / img_id.split("_")[0] / f"{img_id}.JPEG")
+            else:
+                print(f"[stage1-runtime] Detected flat layout for {resolved.name}.")
+                for img_id in tqdm(df["ImageId"], desc=f"Mapping {resolved.name}", unit="file"):
+                    image_paths.append(resolved / f"{img_id}.JPEG")
+            return sorted(image_paths)
+
     subdirs = sorted([d for d in resolved.iterdir() if d.is_dir()])
     if subdirs:
         print(f"[stage1-runtime] Found {len(subdirs)} subdirectories under {resolved}. Indexing...")
