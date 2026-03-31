@@ -113,18 +113,26 @@ def list_image_files(input_path: str | Path) -> list[Path]:
     return image_paths
 
 
-def load_image_array(image_path: str | Path) -> np.ndarray:
+def load_image_array(image_path: str | Path, image_size: int | None = None) -> np.ndarray:
     with Image.open(image_path) as image:
         rgb = image.convert("RGB")
+        if image_size is not None:
+            # Standard DiT/SiT center crop resize logic
+            w, h = rgb.size
+            s = min(w, h)
+            left = (w - s) // 2
+            top = (h - s) // 2
+            rgb = rgb.crop((left, top, left + s, top + s))
+            rgb = rgb.resize((image_size, image_size), Image.BICUBIC)
     return np.asarray(rgb, dtype=np.float32) / 127.5 - 1.0
 
 
-def _load_batch(batch_paths: Sequence[Path], num_workers: int) -> np.ndarray:
+def _load_batch(batch_paths: Sequence[Path], num_workers: int, image_size: int | None = None) -> np.ndarray:
     if num_workers > 0:
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            images = list(executor.map(load_image_array, batch_paths))
+            images = list(executor.map(lambda p: load_image_array(p, image_size), batch_paths))
     else:
-        images = [load_image_array(path) for path in batch_paths]
+        images = [load_image_array(path, image_size) for path in batch_paths]
     return np.stack(images, axis=0)
 
 
@@ -199,9 +207,12 @@ def run_stage1_latent_stats(args: argparse.Namespace) -> Path:
     processed = 0
     total = len(image_paths)
     pbar = tqdm(total=total, desc="Computing stats", unit="img")
+    
+    # ImageNet typically uses 256 for this RAE setup
+    image_size = args.image_size or 256
 
     for batch_idx, batch_paths in enumerate(_iter_batches(image_paths, args.batch_size), start=1):
-        batch = _load_batch(batch_paths, args.num_workers)
+        batch = _load_batch(batch_paths, args.num_workers, image_size=image_size)
         latents = np.asarray(encoder.encode(jnp.asarray(batch)), dtype=np.float32)
         batch_sum = latents.sum(axis=0, dtype=np.float64)
         batch_sumsq = np.square(latents, dtype=np.float64).sum(axis=0, dtype=np.float64)
